@@ -1,3 +1,9 @@
+Version 1.0.4
+    * Add --prompt=REGEX to drive remotes that are not POSIX shells, e.g.
+      the iDRAC racadm>> shell, without sending any PS1/stty setup
+    * Add --line-buffering/-l to hold back unfinished lines instead of
+      printing them as soon as the remote goes quiet
+
 Version 1.0.3
     * Handle libedit Enter key on Mac via an alternative exit route
     * Add additional tracing endpoints

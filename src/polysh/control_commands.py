@@ -98,6 +98,14 @@ def complete_reset_prompt(line: str, text: str) -> List[str]:
 
 def do_reset_prompt(command: str) -> None:
     for i in selected_shells(command):
+        if not i.init_string:
+            # --prompt was given: the remote prompt is not ours to reset
+            console_output(
+                b'Not resetting the prompt of '
+                + i.display_name.encode()
+                + b': it is matched with --prompt\n'
+            )
+            continue
         i.dispatch_command(i.init_string)
 
 

@@ -21,6 +21,7 @@ import atexit
 import getpass
 import locale
 import os
+import re
 import readline
 import resource
 import signal
@@ -118,6 +119,26 @@ def parse_cmdline() -> argparse.Namespace:
         help='ssh command to use [%(default)s]',
     )
     parser.add_argument(
+        '-l',
+        '--line-buffering',
+        action='store_true',
+        dest='line_buffering',
+        help='only print whole lines of remote output, instead of printing '
+        'the partial line sitting in the read buffer as soon as the remote '
+        'goes quiet',
+    )
+    parser.add_argument(
+        '--prompt',
+        type=str,
+        dest='prompt',
+        default=None,
+        metavar='REGEX',
+        help='regex matching the prompt of a non POSIX shell remote, e.g. '
+        '"racadm>>". When given, polysh does not send any shell '
+        'initialization (PS1, stty, ...) and only waits for this prompt '
+        'to know the remote is ready',
+    )
+    parser.add_argument(
         '--user',
         type=str,
         dest='user',
@@ -185,6 +206,12 @@ def parse_cmdline() -> argparse.Namespace:
 
     if not args.host_names:
         parser.error('no hosts given')
+
+    if args.prompt is not None:
+        try:
+            re.compile(args.prompt)
+        except re.error as e:
+            parser.error(f'invalid --prompt regex {args.prompt!r}: {e}')
 
     if args.password_file == '-':
         args.password = getpass.getpass()
