@@ -73,6 +73,45 @@ Options
     sure the command you use launches a `pty`, this may need the `-t` option for
     `ssh`.
 
+`-l`, `--line-buffering`
+    Only print whole lines of remote output
+
+    By default, when a remote goes quiet with an unfinished line sitting in
+    the read buffer, `polysh` prints it right away, so that partial output and
+    interactive prompts are not withheld.  The price is that a remote flushing
+    its output in small pieces gets one prefixed line per piece::
+
+        10.92.255.20  : ge
+        10.92.255.20  : tractime
+
+    With this option `polysh` waits for the newline instead, and the above
+    becomes a single `10.92.255.20  : getractime` line.  An unterminated last
+    line is still printed when the remote goes away.  This is mostly useful
+    together with `--prompt`, as those remotes echo back what `polysh` sends
+    them, a fragment at a time.
+
+`--prompt=REGEX`
+    Regex matching the prompt of a non POSIX shell remote
+
+    By default `polysh` sets `PS1` on the remote shell to a generated marker,
+    and also sends `stty` and other shell setup commands, so that it knows
+    exactly when a remote is ready for the next command.  Some remotes are not
+    POSIX shells and would choke on that, for example the Dell iDRAC
+    `racadm>>` shell.  With `--prompt='racadm>>'` no shell initialization is
+    sent at all, and `polysh` instead considers a remote ready as soon as this
+    regex matches the end of its output.  The regex is a Python regex, so a
+    plain string works as long as it contains no regex metacharacter; trailing
+    blanks after the prompt are ignored.  The matched prompt is swallowed
+    instead of being printed as remote output.
+
+    Since no `stty -echo` is sent either, such remotes usually echo back the
+    commands `polysh` sends them, and those echoes show up in the output.
+    They tend to arrive in fragments, so `--line-buffering` is recommended
+    along with this option.
+
+    Note that control commands relying on shell features, such as
+    `:reset_prompt` and `:rename`, are of no use with these remotes.
+
 `--user=USER`
     Remote user to log in as
 

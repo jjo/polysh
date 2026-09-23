@@ -19,6 +19,7 @@ Copyright (c) 2024 InnoGames GmbH
 import os
 import platform
 import pty
+import re
 import select
 import signal
 import sys
@@ -51,6 +52,26 @@ COLORS = [1] + list(range(30, 37))
 
 # Count the total number of RemoteDispatcher.handle_read() invocations
 nr_handle_read = 0
+
+# Compiled version of options.prompt, see custom_prompt_regexp()
+_custom_prompt_re = None  # type: Optional[re.Pattern]
+
+
+def custom_prompt_regexp() -> Optional['re.Pattern']:
+    """The compiled --prompt regexp, or None when polysh manages the prompt
+    itself by setting PS1 on the remote shell.
+
+    The regexp only matches at the end of the read buffer, optionally
+    followed by blanks: a prompt is what is left over after the last
+    newline, waiting for us to type something."""
+    global _custom_prompt_re
+    if not options.prompt:
+        return None
+    if _custom_prompt_re is None:
+        _custom_prompt_re = re.compile(
+            b'(?:' + options.prompt.encode() + b')[ \t]*\\Z'
+        )
+    return _custom_prompt_re
 
 
 def main_loop_iteration(timeout: Optional[float] = None) -> int:
@@ -102,8 +123,17 @@ class RemoteDispatcher(BufferedDispatcher):
         self.term_size = (-1, -1)
         self.display_name = None  # type: Optional[str]
         self.change_name(self.hostname.encode())
-        self.init_string = self.configure_tty() + self.set_prompt()
+        # configure_tty() also sets up our end of the pty, so call it even
+        # when its shell commands are not sent to the remote
+        tty_commands = self.configure_tty()
+        if options.prompt:
+            # The remote is not a POSIX shell: sending PS1=... or stty would
+            # only confuse it.  We just wait for options.prompt to show up.
+            self.init_string = b''
+        else:
+            self.init_string = tty_commands + self.set_prompt()
         self.init_string_sent = False
+        self.custom_prompt_exit_sent = False
         self.read_in_state_not_started = b''
         self.command = options.command
         self.last_printed_line = b''
@@ -147,6 +177,14 @@ class RemoteDispatcher(BufferedDispatcher):
         except OSError as e:
             # The process was already dead, no problem
             _trace(f'{self.hostname}: kill(-{self.pid}) failed: {e}')
+        if (
+            options.line_buffering
+            and self.read_buffer
+            and self.state in (STATE_IDLE, STATE_RUNNING)
+        ):
+            # With line buffering nothing else will print this, and the last
+            # line of a remote is allowed to lack its newline
+            self.print_lines(self.read_buffer)
         self.read_buffer = b''
         self.write_buffer = b''
         self.set_enabled(False)
@@ -173,6 +211,20 @@ class RemoteDispatcher(BufferedDispatcher):
         _trace(f'{self.hostname}: seen_prompt_cb, interactive={options.interactive}')
         if options.interactive:
             self.change_state(STATE_IDLE)
+        elif options.prompt:
+            # Send a single line per prompt, so that the next prompt is again
+            # the last thing in the read buffer, where handle_custom_prompt()
+            # looks for it.
+            if self.command:
+                self.dispatch_command(self.command.encode() + b'\n')
+                self.command = None
+            elif not self.custom_prompt_exit_sent:
+                self.dispatch_command(b'exit\n')
+                self.custom_prompt_exit_sent = True
+            else:
+                # The remote did not leave on exit, don't wait forever for it
+                _trace(f'{self.hostname}: exit ignored, disconnecting')
+                self.disconnect()
         elif self.command:
             p1, p2 = callbacks.add(b'real prompt ends', lambda d: None, True)
             self.dispatch_command(b'PS1="' + p1 + b'""' + p2 + b'\n"\n')
@@ -272,6 +324,9 @@ class RemoteDispatcher(BufferedDispatcher):
             return False
         self.read_buffer = data[last_nl + 1 :]
         self.print_lines(data[:last_nl])
+        # The leftover may well be a --prompt, don't wait for the read buffer
+        # to time out to notice it
+        self.handle_custom_prompt()
         return True
 
     def handle_read(self) -> None:
@@ -329,13 +384,45 @@ class RemoteDispatcher(BufferedDispatcher):
             if self.handle_read_fast_case(self.read_buffer):
                 return
             lf_pos = self.read_buffer.find(b'\n')
-        if self.state is STATE_NOT_STARTED and not self.init_string_sent:
+        self.handle_custom_prompt()
+        if (
+            self.state is STATE_NOT_STARTED
+            and not self.init_string_sent
+            and self.init_string
+        ):
             self.dispatch_write(self.init_string)
             self.init_string_sent = True
+
+    def handle_custom_prompt(self) -> bool:
+        """With --prompt we cannot rely on our own callbacks, so look for the
+        user supplied prompt at the end of the read buffer.  Return True if it
+        was found, in which case it has been removed from the read buffer as
+        polysh generated prompts are."""
+        prompt_re = custom_prompt_regexp()
+        if prompt_re is None or not self.read_buffer:
+            return False
+        match = prompt_re.search(self.read_buffer)
+        if not match:
+            return False
+        _trace(f'{self.hostname}: custom prompt {match.group(0)!r} seen')
+        leading = self.read_buffer[: match.start()]
+        self.read_buffer = b''
+        if self.state in (STATE_IDLE, STATE_RUNNING):
+            self.print_lines(leading)
+        elif self.state is STATE_NOT_STARTED:
+            self.read_in_state_not_started += leading
+        self.seen_prompt_cb(b'')
+        return True
 
     def print_unfinished_line(self) -> None:
         """The unfinished line stayed long enough in the buffer to be printed"""
         if self.state is STATE_RUNNING:
+            if self.handle_custom_prompt():
+                return
+            if options.line_buffering:
+                # Keep waiting for the newline instead of cutting the line
+                # at whatever byte boundary the remote happened to flush
+                return
             if not callbacks.process(self.read_buffer):
                 self.print_lines(self.read_buffer)
             self.read_buffer = b''
