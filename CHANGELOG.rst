@@ -1,3 +1,19 @@
+Version 1.0.6
+    * Add the :prompt control command, to turn --prompt matching on and off
+      during a session
+    * Forward a locally typed Ctrl-\\ to the remote shells, as is already
+      done for Ctrl-C, instead of dumping core on SIGQUIT
+    * Accept any control character in :send_ctrl, not just the letters, so
+      :send_ctrl \\ works instead of raising ValueError
+    * Do not let a failing control command close the stdin dispatcher, which
+      killed polysh with an unrelated EBADF on the next prompt
+    * Fix Tab completion being dead on CPython builds linked against libedit
+      instead of GNU readline
+    * Report unexpected dispatcher errors on the console instead of only
+      under POLYSH_TRACE
+    * Read VERSION from the package metadata, it had drifted to 0.15 and was
+      reported as such to sentry
+
 Version 1.0.5
     * Add --prompt=REGEX to drive remotes that are not POSIX shells, e.g.
       the iDRAC racadm>> shell, without sending any PS1/stty setup

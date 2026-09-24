@@ -20,3 +20,11 @@ Copyright (c) 2024 InnoGames GmbH
 class ExitNow(Exception):
     """Exception to signal clean exit. First argument is exit code."""
     pass
+
+
+class QuitAsked(Exception):
+    """Raised in the main thread when the user pressed Ctrl-\\.
+
+    SIGINT arrives as KeyboardInterrupt for free, SIGQUIT does not, so the
+    handler raises this to reach the same place in the main loop."""
+    pass

@@ -16,4 +16,27 @@ Copyright (c) 2024 InnoGames GmbH
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-VERSION = (0, 15)
+def _read_version() -> tuple:
+    """Take the version from the installed package metadata.
+
+    It used to be a literal here, which silently drifted away from
+    pyproject.toml and had polysh reporting 0.15 to sentry at version 1.0.5.
+    Numeric components become ints, anything else (a pre-release suffix) is
+    left as a string.
+    """
+    fallback = (1, 0, 6)
+    try:
+        from importlib.metadata import PackageNotFoundError
+        from importlib.metadata import version as installed_version
+    except ImportError:
+        # Python older than 3.8
+        return fallback
+    try:
+        raw = installed_version('polysh')
+    except PackageNotFoundError:
+        # Running from a source tree with no metadata installed
+        return fallback
+    return tuple(p if not p.isdigit() else int(p) for p in raw.split('.'))
+
+
+VERSION = _read_version()

@@ -35,6 +35,23 @@ def _trace(msg: str) -> None:
         print(f'[trace] {msg}', file=sys.stderr, flush=True)
 
 
+def _report_unexpected(disp_name: str, where: str, exc: Exception) -> None:
+    """Tell the user about a dispatcher error that is not plain I/O.
+
+    OSError is the normal way a remote signals it is gone, so it stays quiet.
+    Anything else is a bug, and swallowing it used to leave polysh dying much
+    later on the closed dispatcher with an unrelated message."""
+    if isinstance(exc, OSError):
+        return
+    from polysh.console import console_output
+
+    console_output(
+        'Unexpected {} in {} of {}: {}\n'.format(
+            type(exc).__name__, where, disp_name, exc
+        ).encode()
+    )
+
+
 def loop_iteration(timeout: Optional[float] = None) -> None:
     """Perform a single iteration of the event loop.
 
@@ -91,6 +108,7 @@ def loop_iteration(timeout: Optional[float] = None) -> None:
                 raise
             except Exception as exc:
                 _trace(f'loop_iteration: fd={key.fd} {disp_name} handle_read raised {type(exc).__name__}: {exc}')
+                _report_unexpected(disp_name, 'handle_read', exc)
                 dispatcher.handle_close()
 
         # Re-check dispatcher is still valid after handle_read
@@ -105,4 +123,5 @@ def loop_iteration(timeout: Optional[float] = None) -> None:
                 raise
             except Exception as exc:
                 _trace(f'loop_iteration: fd={key.fd} {disp_name} handle_write raised {type(exc).__name__}: {exc}')
+                _report_unexpected(disp_name, 'handle_write', exc)
                 dispatcher.handle_close()

@@ -53,8 +53,10 @@ COLORS = [1] + list(range(30, 37))
 # Count the total number of RemoteDispatcher.handle_read() invocations
 nr_handle_read = 0
 
-# Compiled version of options.prompt, see custom_prompt_regexp()
+# Compiled version of options.prompt, and the pattern it was built from, see
+# custom_prompt_regexp()
 _custom_prompt_re = None  # type: Optional[re.Pattern]
+_custom_prompt_pattern = None  # type: Optional[str]
 
 
 def custom_prompt_regexp() -> Optional['re.Pattern']:
@@ -63,14 +65,19 @@ def custom_prompt_regexp() -> Optional['re.Pattern']:
 
     The regexp only matches at the end of the read buffer, optionally
     followed by blanks: a prompt is what is left over after the last
-    newline, waiting for us to type something."""
-    global _custom_prompt_re
+    newline, waiting for us to type something.
+
+    options.prompt can change at runtime through the :prompt control
+    command, so the compiled form is cached against the pattern it
+    came from."""
+    global _custom_prompt_re, _custom_prompt_pattern
     if not options.prompt:
         return None
-    if _custom_prompt_re is None:
+    if options.prompt != _custom_prompt_pattern:
         _custom_prompt_re = re.compile(
             b'(?:' + options.prompt.encode() + b')[ \t]*\\Z'
         )
+        _custom_prompt_pattern = options.prompt
     return _custom_prompt_re
 
 
@@ -123,15 +130,16 @@ class RemoteDispatcher(BufferedDispatcher):
         self.term_size = (-1, -1)
         self.display_name = None  # type: Optional[str]
         self.change_name(self.hostname.encode())
-        # configure_tty() also sets up our end of the pty, so call it even
-        # when its shell commands are not sent to the remote
-        tty_commands = self.configure_tty()
+        self._posix_init_string = None  # type: Optional[bytes]
+        # The remote is not a POSIX shell when a prompt regexp is given:
+        # sending PS1=... or stty would only confuse it, we just wait for the
+        # prompt to show up.  configure_tty() still has to run, as it also
+        # sets up our end of the pty.
         if options.prompt:
-            # The remote is not a POSIX shell: sending PS1=... or stty would
-            # only confuse it.  We just wait for options.prompt to show up.
+            self.configure_tty()
             self.init_string = b''
         else:
-            self.init_string = tty_commands + self.set_prompt()
+            self.init_string = self.posix_init_string()
         self.init_string_sent = False
         self.custom_prompt_exit_sent = False
         self.read_in_state_not_started = b''
@@ -244,6 +252,23 @@ class RemoteDispatcher(BufferedDispatcher):
         prompt1, prompt2 = callbacks.add(b'prompt', self.seen_prompt_cb, True)
         command_line += b'PS1="' + prompt1 + b'""' + prompt2 + b'\n"\n'
         return command_line
+
+    def posix_init_string(self) -> bytes:
+        """The shell setup to send when polysh is the one choosing the prompt.
+        Built at most once, as set_prompt() registers a callback each time."""
+        if self._posix_init_string is None:
+            self._posix_init_string = self.configure_tty() + self.set_prompt()
+        return self._posix_init_string
+
+    def apply_prompt_mode(self) -> None:
+        """options.prompt changed, see the :prompt control command.  Going
+        back to a POSIX shell means telling the remote about our PS1 again, as
+        nothing else will."""
+        if options.prompt:
+            self.init_string = b''
+        else:
+            self.init_string = self.posix_init_string()
+            self.dispatch_command(self.init_string)
 
     def readable(self) -> bool:
         """We are always interested in reading from active remote processes if
