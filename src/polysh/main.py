@@ -265,7 +265,6 @@ def loop(interactive: bool) -> None:
                 next_signal = None
                 sig2chr = {
                     signal.SIGINT: 'C',
-                    signal.SIGTSTP: 'Z',
                     signal.SIGQUIT: '\\',
                 }
                 ctrl = sig2chr[current_signal]
