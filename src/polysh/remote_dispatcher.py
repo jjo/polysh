@@ -268,6 +268,12 @@ class RemoteDispatcher(BufferedDispatcher):
             self.init_string = b''
         else:
             self.init_string = self.posix_init_string()
+             if self.state is STATE_NOT_STARTED:
+                # The connection is still coming up.  handle_read() sends
+                # init_string itself once the remote first talks to us, and
+                # dispatching now would skip the not_started diagnostics
+                # (host key prompts, password) by moving us to running early.
+                return
             self.dispatch_command(self.init_string)
 
     def readable(self) -> bool:
