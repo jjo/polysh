@@ -59,6 +59,27 @@ _custom_prompt_re = None  # type: Optional[re.Pattern]
 _custom_prompt_pattern = None  # type: Optional[str]
 
 
+def compile_prompt_regexp(pattern: str) -> 're.Pattern':
+    """Compile a --prompt or :prompt pattern into what is matched against
+    the read buffer, raising re.error if it is invalid.
+
+    Validation has to go through here too, not through re.compile(pattern):
+    remote output is bytes, and a str pattern does not accept the same syntax
+    as a bytes one ('(?u)' is rejected for bytes), nor does a pattern alone
+    accept the same syntax as one wrapped in a group ('(?i)racadm>>' is fine
+    alone but a global flag inside the group is an error).  Anything that
+    passes validation must then compile at runtime.
+
+    The pattern only matches at the end of the read buffer, optionally
+    followed by blanks.  It is compiled on its own first, so that it cannot
+    close the wrapping group early: 'a)|(b' would otherwise compile into an
+    alternation matching 'a' anywhere.  surrogateescape keeps undecodable
+    command line bytes as the bytes they were."""
+    raw = pattern.encode('utf-8', 'surrogateescape')
+    re.compile(raw)
+    return re.compile(b'(?:' + raw + b')[ \t]*\\Z')
+
+
 def custom_prompt_regexp() -> Optional['re.Pattern']:
     """The compiled --prompt regexp, or None when polysh manages the prompt
     itself by setting PS1 on the remote shell.
@@ -74,9 +95,7 @@ def custom_prompt_regexp() -> Optional['re.Pattern']:
     if not options.prompt:
         return None
     if options.prompt != _custom_prompt_pattern:
-        _custom_prompt_re = re.compile(
-            b'(?:' + options.prompt.encode() + b')[ \t]*\\Z'
-        )
+        _custom_prompt_re = compile_prompt_regexp(options.prompt)
         _custom_prompt_pattern = options.prompt
     return _custom_prompt_re
 
@@ -141,6 +160,8 @@ class RemoteDispatcher(BufferedDispatcher):
         else:
             self.init_string = self.posix_init_string()
         self.init_string_sent = False
+        # Whether the remote has said anything yet, see apply_prompt_mode()
+        self.remote_spoke = False
         self.custom_prompt_exit_sent = False
         self.read_in_state_not_started = b''
         self.command = options.command
@@ -268,11 +289,20 @@ class RemoteDispatcher(BufferedDispatcher):
             self.init_string = b''
         else:
             self.init_string = self.posix_init_string()
-             if self.state is STATE_NOT_STARTED:
+            if self.state is STATE_NOT_STARTED:
                 # The connection is still coming up.  handle_read() sends
                 # init_string itself once the remote first talks to us, and
                 # dispatching now would skip the not_started diagnostics
                 # (host key prompts, password) by moving us to running early.
+                #
+                # But if the remote has talked already, handle_read() is past
+                # that point, typically because a wrong --prompt never
+                # matched and the remote now sits silent at its own prompt.
+                # Nothing would ever send init_string then, so write it now,
+                # still without leaving not_started.
+                if self.remote_spoke and not self.init_string_sent:
+                    self.dispatch_write(self.init_string)
+                    self.init_string_sent = True
                 return
             self.dispatch_command(self.init_string)
 
@@ -416,13 +446,11 @@ class RemoteDispatcher(BufferedDispatcher):
                 return
             lf_pos = self.read_buffer.find(b'\n')
         self.handle_custom_prompt()
-        if (
-            self.state is STATE_NOT_STARTED
-            and not self.init_string_sent
-            and self.init_string
-        ):
-            self.dispatch_write(self.init_string)
-            self.init_string_sent = True
+        if self.state is STATE_NOT_STARTED:
+            self.remote_spoke = True
+            if not self.init_string_sent and self.init_string:
+                self.dispatch_write(self.init_string)
+                self.init_string_sent = True
 
     def handle_custom_prompt(self) -> bool:
         """With --prompt we cannot rely on our own callbacks, so look for the

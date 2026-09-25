@@ -11,8 +11,13 @@ Version 1.0.6
       instead of GNU readline
     * Report unexpected dispatcher errors on the console instead of only
       under POLYSH_TRACE
-    * Read VERSION from the package metadata, it had drifted to 0.15 and was
-      reported as such to sentry
+    * Validate --prompt and :prompt patterns exactly as they are matched,
+      as bytes and wrapped, so a pattern like (?u)... or (?i)... is rejected
+      up front instead of crashing on the first read
+    * Keep the version in polysh/__init__.py and let pyproject.toml read it
+      through its dynamic key, it had drifted to 0.15 there and was reported
+      as such to sentry
+    * Update the hard coded version in flake.nix, which had drifted too
 
 Version 1.0.5
     * Add --prompt=REGEX to drive remotes that are not POSIX shells, e.g.

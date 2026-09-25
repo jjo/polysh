@@ -112,7 +112,7 @@ def do_prompt(command: str) -> None:
         pattern = ''
     if pattern:
         try:
-            re.compile(pattern)
+            remote_dispatcher.compile_prompt_regexp(pattern)
         except re.error as e:
             console_output(
                 f'Invalid prompt regex {pattern}: {e}\n'.encode()

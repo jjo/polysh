@@ -209,7 +209,7 @@ def parse_cmdline() -> argparse.Namespace:
 
     if args.prompt is not None:
         try:
-            re.compile(args.prompt)
+            remote_dispatcher.compile_prompt_regexp(args.prompt)
         except re.error as e:
             parser.error(f'invalid --prompt regex {args.prompt!r}: {e}')
 

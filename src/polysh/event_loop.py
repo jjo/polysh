@@ -45,11 +45,15 @@ def _report_unexpected(disp_name: str, where: str, exc: Exception) -> None:
         return
     from polysh.console import console_output
 
-    console_output(
-        'Unexpected {} in {} of {}: {}\n'.format(
-            type(exc).__name__, where, disp_name, exc
-        ).encode()
-    )
+    try:
+        console_output(
+            'Unexpected {} in {} of {}: {}\n'.format(
+                type(exc).__name__, where, disp_name, exc
+            ).encode()
+        )
+    except Exception as report_exc:
+        # Reporting must never keep the caller from closing the dispatcher
+        _trace(f'_report_unexpected: could not report: {report_exc}')
 
 
 def loop_iteration(timeout: Optional[float] = None) -> None:

@@ -22,9 +22,11 @@ class ExitNow(Exception):
     pass
 
 
-class QuitAsked(Exception):
-    """Raised in the main thread when the user pressed Ctrl-\\.
+class QuitAsked(BaseException):
+    """Raised in the main thread when the user pressed Ctrl-\\, letting
+    it kill the process so that the user has a way to quit polysh.
 
-    SIGINT arrives as KeyboardInterrupt for free, SIGQUIT does not, so the
-    handler raises this to reach the same place in the main loop."""
+    SIGINT arrives as KeyboardInterrupt for free (and it's passed through
+    to the remote shell), SIGQUIT does not, so the handler raises this to reach
+    the same place in the main loop."""
     pass
